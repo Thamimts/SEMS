@@ -12,9 +12,16 @@ import {
   Play,
   Pause,
   RefreshCw,
+  Menu,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import InteractiveMap from '../components/InteractiveMap';
+import EnhancedInteractiveMap from '../components/EnhancedInteractiveMap';
+import EnhancedV2XPanel from '../components/EnhancedV2XPanel';
+import AITrafficAnalytics from '../components/AITrafficAnalytics';
+import HospitalIntelligencePanel from '../components/HospitalIntelligencePanel';
+import RealTimeEventTimeline from '../components/RealTimeEventTimeline';
+import EnhancedAmbulancePanel from '../components/EnhancedAmbulancePanel';
+import SmartEmergencyAlert from '../components/SmartEmergencyAlert';
 import TrafficSignal from '../components/TrafficSignal';
 import AlertPopup from '../components/AlertPopup';
 import { useEmergency } from '../context/EmergencyContext';
@@ -22,6 +29,7 @@ import { useLocation } from '../context/LocationContext';
 import LiveLocationCard from '../components/LiveLocationCard';
 import { useNavigate } from 'react-router-dom';
 import { useAmbulanceTracking } from '../hooks/useAmbulanceTracking';
+import { animationVariants, transitionConfig } from '../utils/animationEffects';
 
 const MOCK_NEARBY = [
   { lat: 13.095, lng: 80.276, type: 'car', name: 'Vehicle DL-04-XX' },
@@ -71,7 +79,13 @@ export default function EmergencyTracking() {
 
   const [eta, setEta] = useState(6);
   const [sirenOn, setSirenOn] = useState(true);
-  const [widgetsOpen, setWidgetsOpen] = useState(true);
+  const [showLeftPanel, setShowLeftPanel] = useState(true);
+  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [showBottomPanel, setShowBottomPanel] = useState(true);
+  const [panelLayout, setPanelLayout] = useState('expanded'); // expanded, compact, fullscreen
+  const [emergencyAlertActive, setEmergencyAlertActive] = useState(false);
+  const [emergencyLevel, setEmergencyLevel] = useState(5);
+  const [currentSpeed, setCurrentSpeed] = useState(65);
   const [v2vMessages, setV2vMessages] = useState([
     { id: 1, from: 'Vehicle DL-04-XX', msg: 'Clearing lane', time: '2s' },
     { id: 2, from: 'Signal #42', msg: 'Green corridor granted', time: '5s' },
@@ -95,12 +109,14 @@ export default function EmergencyTracking() {
     }
   }, [isActive, routePath, isSimulating]);
 
+  // ETA countdown
   useEffect(() => {
     if (!isActive) return;
     const t = setInterval(() => setEta((e) => Math.max(1, e - 0.1)), 3000);
     return () => clearInterval(t);
   }, [isActive]);
 
+  // V2V message simulation
   useEffect(() => {
     if (!isActive) return;
     const interval = setInterval(() => {
@@ -115,6 +131,27 @@ export default function EmergencyTracking() {
       ]);
     }, 5000);
     return () => clearInterval(interval);
+  }, [isActive]);
+
+  // Simulate speed variations
+  useEffect(() => {
+    if (!isActive) return;
+    const speedInterval = setInterval(() => {
+      setCurrentSpeed((s) => {
+        const variation = (Math.random() - 0.5) * 10;
+        return Math.max(30, Math.min(80, s + variation));
+      });
+    }, 2000);
+    return () => clearInterval(speedInterval);
+  }, [isActive]);
+
+  // Emergency level indicator (decreases as we approach)
+  useEffect(() => {
+    if (!isActive) return;
+    const levelInterval = setInterval(() => {
+      setEmergencyLevel((l) => Math.max(1, l - 0.1));
+    }, 4000);
+    return () => clearInterval(levelInterval);
   }, [isActive]);
 
   const formatEta = (min) => `${Math.floor(min)} min ${Math.round((min % 1) * 60)} sec`;
@@ -138,11 +175,25 @@ export default function EmergencyTracking() {
 
   return (
     <Layout>
+      {/* Smart Emergency Alert - appears when ambulance is near */}
+      <SmartEmergencyAlert
+        show={emergencyAlertActive}
+        distance={20}
+        vehicleCount={5}
+        onDismiss={() => setEmergencyAlertActive(false)}
+        onReroute={() => {
+          // Handle rerouting logic
+          updateRoute();
+          setEmergencyAlertActive(false);
+        }}
+        playSound={sirenOn}
+      />
+
       <AlertPopup show={showAlertPopup} distance={alertDistance} onDismiss={() => setShowAlertPopup(false)} />
 
-      <div className="relative h-[calc(100vh-0px)] lg:h-screen">
+      <div className="relative h-[calc(100vh-0px)] lg:h-screen overflow-hidden bg-cyber-black">
         {/* Full screen interactive map */}
-        <InteractiveMap
+        <EnhancedInteractiveMap
           className="absolute inset-0"
           ambulanceLocation={ambulanceLocation}
           destinationLocation={destinationLocation}
@@ -152,6 +203,8 @@ export default function EmergencyTracking() {
           nearbyVehicles={MOCK_NEARBY}
           showCorridor={greenCorridor || isActive}
           isLoading={isCalculatingRoute}
+          emergencyLevel={emergencyLevel}
+          apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
         />
 
         {/* Siren overlay animation */}
@@ -159,191 +212,274 @@ export default function EmergencyTracking() {
           {sirenOn && isActive && (
             <motion.div
               className="absolute inset-0 pointer-events-none z-10"
-              animate={{ boxShadow: ['inset 0 0 0 0 rgba(255,45,85,0)', 'inset 0 0 80px 20px rgba(255,45,85,0.15)', 'inset 0 0 0 0 rgba(255,45,85,0)'] }}
+              animate={{
+                boxShadow: [
+                  'inset 0 0 0 0 rgba(255,45,85,0)',
+                  'inset 0 0 80px 20px rgba(255,45,85,0.15)',
+                  'inset 0 0 0 0 rgba(255,45,85,0)',
+                ],
+              }}
               transition={{ duration: 1, repeat: Infinity }}
             />
           )}
         </AnimatePresence>
 
-        {/* Top bar */}
-        <div className="absolute top-0 inset-x-0 z-20 p-4 flex items-start justify-between gap-4">
+        {/* Top bar - Emergency Status */}
+        <div className="absolute top-0 inset-x-0 z-20 p-4 flex items-start justify-between gap-4 flex-wrap">
           <motion.div
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
+            {...animationVariants.slideInTop}
+            transition={transitionConfig.normal}
             className="glass-card px-4 py-3 flex items-center gap-3 border-cyber-red/30"
           >
-            <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.8, repeat: Infinity }}>
+            <motion.div
+              animate={{ opacity: [1, 0.3, 1], scale: [1, 1.1, 1] }}
+              transition={{ duration: 0.8, repeat: Infinity }}
+            >
               <AlertTriangle className="w-6 h-6 text-cyber-red" />
             </motion.div>
             <div>
-              <p className="font-display text-xs font-bold text-cyber-red tracking-wider">EMERGENCY ACTIVE</p>
+              <p className="font-display text-xs font-bold text-cyber-red tracking-wider uppercase">
+                EMERGENCY ACTIVE
+              </p>
               <p className="text-[10px] text-white/40 font-mono">{emergencyData?.id || 'EMG-LIVE'}</p>
             </div>
           </motion.div>
 
           <motion.div
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
+            {...animationVariants.slideInTop}
+            transition={{ ...transitionConfig.normal, delay: 0.1 }}
             className="glass-card px-5 py-3 text-center border-cyber-blue/30"
           >
             <p className="text-[10px] text-white/40 uppercase">ETA to Hospital</p>
-            <p className="font-display text-2xl font-bold neon-text-blue">{formatEta(eta)}</p>
+            <p className="font-display text-2xl font-bold text-cyber-blue">{formatEta(eta)}</p>
             <p className="text-xs text-white/50">{hospital?.name}</p>
           </motion.div>
 
-          <button
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
             onClick={() => setSirenOn(!sirenOn)}
-            className={`glass-card p-3 ${sirenOn ? 'border-cyber-red/40' : ''}`}
+            className={`glass-card p-3 transition ${sirenOn ? 'border-cyber-red/40 hover:shadow-lg hover:shadow-cyber-red/30' : 'border-white/10'}`}
+            title={sirenOn ? 'Disable siren' : 'Enable siren'}
           >
-            <Volume2 className={`w-5 h-5 ${sirenOn ? 'text-cyber-red animate-siren' : 'text-white/40'}`} />
-          </button>
+            <motion.div
+              animate={sirenOn ? { scale: [1, 1.1, 1], opacity: [1, 0.7, 1] } : {}}
+              transition={{ duration: 0.6, repeat: sirenOn ? Infinity : 0 }}
+            >
+              <Volume2 className={`w-5 h-5 ${sirenOn ? 'text-cyber-red' : 'text-white/40'}`} />
+            </motion.div>
+          </motion.button>
         </div>
 
-        {/* Floating widgets */}
+        {/* Left Panel - Ambulance & V2X */}
         <AnimatePresence>
-          {widgetsOpen && (
+          {showLeftPanel && (
             <motion.div
-              initial={{ x: -300, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: -300, opacity: 0 }}
-              className="absolute left-4 top-24 bottom-24 z-20 w-72 sm:w-80 overflow-y-auto space-y-3 hidden sm:block"
+              {...animationVariants.slideInLeft}
+              transition={transitionConfig.smooth}
+              className="absolute left-4 top-32 bottom-24 z-20 w-80 overflow-y-auto space-y-3 hidden lg:block"
             >
-              {/* V2V Communication */}
-              <div className="glass-card p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Car className="w-4 h-4 text-cyber-amber" />
-                  <h4 className="font-display text-xs font-bold">V2V COMMUNICATION</h4>
-                  <motion.span
-                    animate={{ opacity: [1, 0.4, 1] }}
-                    transition={{ repeat: Infinity, duration: 1.5 }}
-                    className="ml-auto w-2 h-2 rounded-full bg-cyber-green"
-                  />
+              {/* Enhanced Ambulance Panel */}
+              <EnhancedAmbulancePanel
+                ambulanceLocation={ambulanceLocation}
+                speed={currentSpeed}
+                eta={eta}
+                driverStatus="Alert"
+                fuelLevel={85}
+                gpsAccuracy={92}
+                emergencyLevel={Math.ceil(emergencyLevel)}
+                v2xNodes={8}
+              />
+
+              {/* Enhanced V2X Panel */}
+              <EnhancedV2XPanel v2xStatus="Active" connectedVehicles={8} activeAlerts={5} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Right Panel - Traffic Analytics & Hospital Intel */}
+        <AnimatePresence>
+          {showRightPanel && (
+            <motion.div
+              {...animationVariants.slideInRight}
+              transition={transitionConfig.smooth}
+              className="absolute right-4 top-32 bottom-24 z-20 w-80 overflow-y-auto space-y-3 hidden lg:block"
+            >
+              {/* AI Traffic Analytics */}
+              <AITrafficAnalytics />
+
+              {/* Hospital Intelligence Panel */}
+              <HospitalIntelligencePanel hospital={hospital} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bottom Panel - Timeline & Controls */}
+        <AnimatePresence>
+          {showBottomPanel && (
+            <motion.div
+              {...animationVariants.slideInBottom}
+              transition={transitionConfig.smooth}
+              className="absolute bottom-0 inset-x-0 z-20 p-4"
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Timeline - takes full width on mobile, 1/3 on desktop */}
+                <div className="lg:col-span-2">
+                  <RealTimeEventTimeline />
                 </div>
-                <div className="space-y-2 max-h-36 overflow-y-auto">
-                  {v2vMessages.map((m) => (
-                    <motion.div
-                      key={m.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="p-2 rounded-lg bg-cyber-dark/60 text-xs"
+
+                {/* Control Panel */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={transitionConfig.smooth}
+                  className="glass-card p-4 backdrop-blur-xl border border-cyber-blue/20"
+                >
+                  <h3 className="font-display text-sm font-bold text-cyber-blue uppercase mb-3">Controls</h3>
+
+                  <div className="space-y-2 mb-4">
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="p-2 rounded-lg bg-cyber-dark/40 border border-white/5">
+                        <p className="text-[10px] text-white/40">Distance</p>
+                        <p className="font-mono font-bold text-sm">{routeInfo?.distance?.toFixed(1) || '--'} km</p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-cyber-dark/40 border border-white/5">
+                        <p className="text-[10px] text-white/40">Speed</p>
+                        <p className="font-mono font-bold text-sm text-cyber-blue">{Math.round(currentSpeed)} km/h</p>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2">
+                      {routePath.length > 1 && (
+                        <>
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={isSimulating ? stopLiveSimulation : startLiveSimulation}
+                            className="flex-1 px-2 py-2 rounded-lg border border-cyber-blue/30 text-xs hover:bg-cyber-blue/10 flex items-center justify-center gap-1 text-cyber-blue transition"
+                            title={isSimulating ? 'Stop simulation' : 'Start simulation'}
+                          >
+                            {isSimulating ? (
+                              <>
+                                <Pause className="w-3 h-3" />
+                                Pause
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3 h-3" />
+                                Simulate
+                              </>
+                            )}
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={updateRoute}
+                            className="px-2 py-2 rounded-lg border border-cyber-amber/30 text-xs hover:bg-cyber-amber/10 text-cyber-amber transition"
+                            title="Recalculate route"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isCalculatingRoute ? 'animate-spin' : ''}`} />
+                          </motion.button>
+                        </>
+                      )}
+                    </div>
+
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => navigate('/verification')}
+                      className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-cyber-green to-cyber-green/70 text-white font-bold text-xs uppercase hover:shadow-lg hover:shadow-cyber-green/30 transition"
                     >
-                      <p className="text-cyber-blue font-mono">{m.from}</p>
-                      <p className="text-white/70">{m.msg}</p>
-                      <p className="text-white/20 text-[10px] mt-0.5">{m.time}</p>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-
-              {/* V2I Traffic signals */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 px-1">
-                  <Radio className="w-4 h-4 text-cyber-green" />
-                  <h4 className="font-display text-xs font-bold">V2I SMART SIGNALS</h4>
-                </div>
-                <TrafficSignal activeLight="green" label="Signal #42 — Ring Road" corridor={greenCorridor} />
-                <TrafficSignal activeLight="red" label="Signal #18 — CP Junction" corridor={false} />
-                <TrafficSignal activeLight="green" label="Signal #07 — Barakhamba" corridor={greenCorridor} />
-              </div>
-
-              <LiveLocationCard compact />
-
-              {/* Nearby alerts */}
-              <div className="glass-card p-4">
-                <h4 className="font-display text-xs font-bold mb-2">NEARBY VEHICLE ALERTS</h4>
-                {MOCK_NEARBY.map((_, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1.5 text-xs text-white/50">
-                    <Zap className="w-3 h-3 text-cyber-amber" />
-                    Alert sent to vehicle #{i + 1}
+                      Arrived at Hospital
+                    </motion.button>
                   </div>
-                ))}
+
+                  {/* Status */}
+                  {greenCorridor && (
+                    <motion.div
+                      animate={{ opacity: [0.7, 1, 0.7] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                      className="p-2 rounded-lg bg-cyber-green/20 text-cyber-green border border-cyber-green/30 text-center text-xs font-bold uppercase"
+                    >
+                      GREEN CORRIDOR ACTIVE
+                    </motion.div>
+                  )}
+                </motion.div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Bottom bar */}
-        <div className="absolute bottom-0 inset-x-0 z-20 p-4">
-          <div className="glass-card p-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <Navigation className="w-5 h-5 text-cyber-green" />
-                <div>
-                  <p className="text-[10px] text-white/40">Distance</p>
-                  <p className="font-mono font-bold">{routeInfo?.distance || hospital?.distance || '--'} km</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-cyber-blue" />
-                <div>
-                  <p className="text-[10px] text-white/40">ETA</p>
-                  <p className="font-mono font-bold text-cyber-blue">
-                    {routeInfo?.duration || countdown ? `${Math.floor((routeInfo?.duration || countdown) / 60)}:${((routeInfo?.duration || countdown) % 60).toString().padStart(2, '0')}` : '--:--'}
-                  </p>
-                </div>
-              </div>
-              {greenCorridor && (
-                <motion.span
-                  animate={{ opacity: [0.7, 1, 0.7] }}
-                  transition={{ repeat: Infinity, duration: 1.5 }}
-                  className="px-3 py-1 text-xs font-bold bg-cyber-green/20 text-cyber-green rounded-full border border-cyber-green/30"
-                >
-                  GREEN CORRIDOR
-                </motion.span>
-              )}
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {/* Live Simulation Controls */}
-              <div className="flex gap-2">
-                {routePath.length > 1 && (
-                  <>
-                    <button
-                      onClick={isSimulating ? stopLiveSimulation : startLiveSimulation}
-                      className="px-3 py-2 rounded-xl border border-cyber-blue/30 text-sm hover:bg-cyber-blue/10 flex items-center gap-2 text-cyber-blue transition"
-                      title={isSimulating ? 'Stop ambulance simulation' : 'Start ambulance movement simulation'}
-                    >
-                      {isSimulating ? (
-                        <>
-                          <Pause className="w-4 h-4" />
-                          Pause
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          Simulate
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={updateRoute}
-                      className="px-3 py-2 rounded-xl border border-cyber-amber/30 text-sm hover:bg-cyber-amber/10 flex items-center gap-2 text-cyber-amber transition"
-                      title="Recalculate route"
-                    >
-                      <RefreshCw className={`w-4 h-4 ${isCalculatingRoute ? 'animate-spin' : ''}`} />
-                    </button>
-                  </>
-                )}
-              </div>
-              <button
-                onClick={() => setWidgetsOpen(!widgetsOpen)}
-                className="px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5 hidden sm:block"
-              >
-                {widgetsOpen ? 'Hide' : 'Show'} Panels
-              </button>
-              <button onClick={() => navigate('/verification')} className="btn-primary text-sm py-2">
-                Arrived at Hospital
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile widget toggle */}
-        <button
-          onClick={() => setWidgetsOpen(!widgetsOpen)}
-          className="sm:hidden absolute right-4 top-24 z-20 glass-card p-3"
+        {/* Floating Action Buttons - Mobile & Desktop Toggle */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="absolute top-4 right-4 z-20 flex flex-col gap-2 lg:hidden"
         >
-          {widgetsOpen ? <X size={18} /> : <Car size={18} />}
-        </button>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowLeftPanel(!showLeftPanel)}
+            className="glass-card p-3 hover:shadow-lg hover:shadow-cyber-blue/30 transition"
+            title={showLeftPanel ? 'Hide left panel' : 'Show left panel'}
+          >
+            <Car className="w-5 h-5 text-cyber-blue" />
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowRightPanel(!showRightPanel)}
+            className="glass-card p-3 hover:shadow-lg hover:shadow-cyber-amber/30 transition"
+            title={showRightPanel ? 'Hide right panel' : 'Show right panel'}
+          >
+            <Radio className="w-5 h-5 text-cyber-amber" />
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowBottomPanel(!showBottomPanel)}
+            className="glass-card p-3 hover:shadow-lg hover:shadow-cyber-green/30 transition"
+            title={showBottomPanel ? 'Hide bottom panel' : 'Show bottom panel'}
+          >
+            <Menu className="w-5 h-5 text-cyber-green" />
+          </motion.button>
+        </motion.div>
+
+        {/* Desktop Panel Toggles */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="absolute top-4 left-4 z-20 flex gap-2 hidden lg:flex"
+        >
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowLeftPanel(!showLeftPanel)}
+            className="glass-card px-3 py-2 text-xs text-cyber-blue border border-cyber-blue/20 hover:border-cyber-blue/40 transition"
+          >
+            {showLeftPanel ? 'Hide' : 'Show'} Left
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowRightPanel(!showRightPanel)}
+            className="glass-card px-3 py-2 text-xs text-cyber-amber border border-cyber-amber/20 hover:border-cyber-amber/40 transition"
+          >
+            {showRightPanel ? 'Hide' : 'Show'} Right
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowBottomPanel(!showBottomPanel)}
+            className="glass-card px-3 py-2 text-xs text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 transition"
+          >
+            {showBottomPanel ? 'Hide' : 'Show'} Bottom
+          </motion.button>
+        </motion.div>
       </div>
     </Layout>
   );
